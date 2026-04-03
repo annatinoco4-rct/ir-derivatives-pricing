@@ -9,6 +9,8 @@ Modules:
 """
 
 import numpy as np
+import pandas as pd
+import requests
 from scipy.interpolate import CubicSpline
 
 
@@ -127,3 +129,48 @@ def spot_rate(maturity: float, discount_factor: float) -> float:
     float — continuously-compounded spot rate r(T) = -ln(P(0,T)) / T
     """
     return -np.log(discount_factor) / maturity
+
+# ── 5. Market data — FRED Treasury yields ────────────────────────────────────
+
+FRED_TICKERS = {
+    "DGS1MO": 1/12,
+    "DGS3MO": 0.25,
+    "DGS6MO": 0.5,
+    "DGS1":   1.0,
+    "DGS2":   2.0,
+    "DGS3":   3.0,
+    "DGS5":   5.0,
+    "DGS7":   7.0,
+    "DGS10":  10.0,
+    "DGS20":  20.0,
+    "DGS30":  30.0,
+}
+
+
+def fetch_treasury_yields() -> tuple[np.ndarray, np.ndarray]:
+    """
+    Download the most recent on-the-run US Treasury par yields from FRED.
+
+    Returns
+    -------
+    maturities : np.ndarray — tenor in years
+    yields     : np.ndarray — par yields in decimal (e.g. 0.045 for 4.5%)
+    """
+    base = "https://fred.stlouisfed.org/graph/fredgraph.csv?id="
+    maturities, yields = [], []
+
+    for ticker, maturity in FRED_TICKERS.items():
+        url = base + ticker
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        lines = resp.text.strip().split("\n")
+        # Last non-missing row
+        for line in reversed(lines[1:]):
+            date, val = line.split(",")
+            if val.strip() != ".":
+                maturities.append(maturity)
+                yields.append(float(val) / 100)
+                break
+
+    idx = np.argsort(maturities)
+    return np.array(maturities)[idx], np.array(yields)[idx]
