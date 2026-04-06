@@ -132,3 +132,75 @@ def implied_vol(market_price: float, F: float, K: float,
         return black76_caplet(F, K, sigma, T, tau, discount, is_cap)["price"] - market_price
 
     return brentq(objective, sigma_lo, sigma_hi, xtol=1e-8)
+
+# ── 5. European Swaption ─────────────────────────────────────────────────────
+
+def black76_swaption(F_swap: float, K: float, sigma: float, T: float,
+                     annuity: float, is_payer: bool = True) -> dict:
+    """
+    Price a European swaption using Black 76.
+
+    A payer swaption gives the right to enter a swap paying fixed K.
+    A receiver swaption gives the right to receive fixed K.
+
+    Parameters
+    ----------
+    F_swap  : float — forward swap rate (decimal)
+    K       : float — strike (fixed rate of the underlying swap, decimal)
+    sigma   : float — implied vol (annual, decimal)
+    T       : float — option expiry in years
+    annuity : float — swap annuity = sum of tau_i * P(0, T_i) over swap tenor
+    is_payer: bool  — True = payer swaption, False = receiver swaption
+
+    Returns
+    -------
+    dict with keys: price, delta, vega
+    """
+    d1, d2 = _d1_d2(F_swap, K, sigma, T)
+
+    if is_payer:
+        price = annuity * (F_swap * norm.cdf(d1) - K * norm.cdf(d2))
+        delta = annuity * norm.cdf(d1)
+    else:
+        price = annuity * (K * norm.cdf(-d2) - F_swap * norm.cdf(-d1))
+        delta = -annuity * norm.cdf(-d1)
+
+    vega = annuity * F_swap * norm.pdf(d1) * np.sqrt(T)
+
+    return {"price": price, "delta": delta, "vega": vega}
+
+
+# ── 6. Forward swap rate ──────────────────────────────────────────────────────
+
+def forward_swap_rate(discount_factors: np.ndarray,
+                      maturities: np.ndarray,
+                      T_start: float, T_end: float,
+                      freq: int = 2) -> tuple[float, float]:
+    """
+    Compute the forward swap rate and annuity for a swap T_start -> T_end.
+
+    Parameters
+    ----------
+    discount_factors : np.ndarray — P(0, T) on the maturity grid
+    maturities       : np.ndarray — maturity grid in years
+    T_start          : float — swap start in years
+    T_end            : float — swap end in years
+    freq             : int   — payment frequency per year (default 2 = semiannual)
+
+    Returns
+    -------
+    (F_swap, annuity) : tuple[float, float]
+    """
+    tau = 1.0 / freq
+    payment_dates = np.arange(T_start + tau, T_end + 1e-9, tau)
+
+    P_start = float(np.interp(T_start, maturities, discount_factors))
+    P_end   = float(np.interp(T_end,   maturities, discount_factors))
+
+    annuity = sum(
+        tau * float(np.interp(t, maturities, discount_factors))
+        for t in payment_dates
+    )
+
+    F_swap = (P_start - P_end) / annuity
+    return F_swap, annuity
